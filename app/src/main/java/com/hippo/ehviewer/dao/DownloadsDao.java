@@ -36,6 +36,8 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
         public final static Property Legacy = new Property(11, int.class, "legacy", false, "LEGACY");
         public final static Property Time = new Property(12, long.class, "time", false, "TIME");
         public final static Property Label = new Property(13, String.class, "label", false, "LABEL");
+
+        public final static Property ArchiveUri = new Property(14, String.class, "archiveUri",false,"ARCHIVEURI");
     };
 
 
@@ -64,7 +66,8 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
                 "\"STATE\" INTEGER NOT NULL ," + // 10: state
                 "\"LEGACY\" INTEGER NOT NULL ," + // 11: legacy
                 "\"TIME\" INTEGER NOT NULL ," + // 12: time
-                "\"LABEL\" TEXT);"); // 13: label
+                "\"LABEL\" TEXT," + // 13: label
+                "\"ARCHIVEURI\" TEXT);"); // 14: archiveUri
     }
 
     /** Drops the underlying database table. */
@@ -122,6 +125,11 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
         if (label != null) {
             stmt.bindString(14, label);
         }
+        
+        String archiveUri = entity.getArchiveUri();
+        if (archiveUri != null) {
+            stmt.bindString(15, archiveUri);
+        }
     }
 
     @Override
@@ -173,6 +181,11 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
         if (label != null) {
             stmt.bindString(14, label);
         }
+        
+        String archiveUri = entity.getArchiveUri();
+        if (archiveUri != null) {
+            stmt.bindString(15, archiveUri);
+        }
     }
 
     @Override
@@ -197,7 +210,7 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
             cursor.getInt(offset + 11), // legacy
             cursor.getLong(offset + 12), // time
             cursor.isNull(offset + 13) ? null : cursor.getString(offset + 13), // label
-                null
+            cursor.isNull(offset + 14) ? null : cursor.getString(offset + 14) // archiveUri
         );
         return entity;
     }
@@ -218,6 +231,7 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
         entity.setLegacy(cursor.getInt(offset + 11));
         entity.setTime(cursor.getLong(offset + 12));
         entity.setLabel(cursor.isNull(offset + 13) ? null : cursor.getString(offset + 13));
+        entity.setArchiveUri(cursor.isNull(offset + 14) ? null : cursor.getString(offset + 14));
      }
     
     @Override

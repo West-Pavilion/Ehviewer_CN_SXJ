@@ -575,6 +575,14 @@ public class DownloadsScene extends ToolbarScene
     public void onDestroyView() {
         super.onDestroyView();
 
+        // Clean up thumbnail cache to prevent memory leaks
+        for (Bitmap bitmap : thumbnailCache.values()) {
+            if (bitmap != null && !bitmap.isRecycled()) {
+                bitmap.recycle();
+            }
+        }
+        thumbnailCache.clear();
+
         if (null != mShowcaseView) {
             ViewUtils.removeFromParent(mShowcaseView);
             mShowcaseView = null;
@@ -1356,28 +1364,43 @@ public class DownloadsScene extends ToolbarScene
             Intent data = result.getData();
             if (data != null) {
                 GalleryInfo info = data.getParcelableExtra("info");
-                mSpiderInfoMap.remove(info.gid);
-                SpiderInfo spiderInfo = getSpiderInfo(info);
-                if (spiderInfo != null) {
-                    mSpiderInfoMap.put(info.gid, spiderInfo);
-                    int position = -1;
-                    if (mList == null || mAdapter == null) {
-                        return;
-                    }
-                    for (int i = 0; i < mList.size(); i++) {
-                        if (mList.get(i).gid == info.gid) {
-                            position = listIndexInPage(i);
-                            break;
-                        }
-                    }
-                    if (position != -1) {
-                        mAdapter.notifyItemChanged(position);
-                    } else {
-                        mAdapter.notifyDataSetChanged();
-                    }
-
+                if (info == null) {
+                    return;
                 }
-
+                
+                // Check if this is an imported archive - skip SpiderInfo processing
+                boolean isImportedArchive = false;
+                if (info instanceof DownloadInfo) {
+                    DownloadInfo downloadInfo = (DownloadInfo) info;
+                    isImportedArchive = downloadInfo.archiveUri != null && 
+                                       downloadInfo.archiveUri.startsWith("content://");
+                }
+                
+                if (!isImportedArchive) {
+                    // Only process SpiderInfo for regular downloads, not imported archives
+                    mSpiderInfoMap.remove(info.gid);
+                    SpiderInfo spiderInfo = getSpiderInfo(info);
+                    if (spiderInfo != null) {
+                        mSpiderInfoMap.put(info.gid, spiderInfo);
+                    }
+                }
+                
+                // Update the UI regardless of archive type
+                int position = -1;
+                if (mList == null || mAdapter == null) {
+                    return;
+                }
+                for (int i = 0; i < mList.size(); i++) {
+                    if (mList.get(i).gid == info.gid) {
+                        position = listIndexInPage(i);
+                        break;
+                    }
+                }
+                if (position != -1) {
+                    mAdapter.notifyItemChanged(position);
+                } else {
+                    mAdapter.notifyDataSetChanged();
+                }
             }
         }
     }
@@ -1729,7 +1752,15 @@ public class DownloadsScene extends ToolbarScene
 
                 holder.title.setText(title);
                 holder.uploader.setText(info.uploader);
-                holder.rating.setRating(info.rating);
+                
+                // Handle rating display for imported archives
+                if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
+                    // For imported archives, show 5 stars or hide rating
+                    holder.rating.setRating(5.0f);
+                } else {
+                    // For normal downloads, show actual rating
+                    holder.rating.setRating(info.rating);
+                }
 
                 SpiderInfo spiderInfo = mSpiderInfoMap.get(info.gid);
 
@@ -1744,7 +1775,7 @@ public class DownloadsScene extends ToolbarScene
                 String newCategoryText;
                 int categoryColor;
                 
-                // Special handling for imported archives
+                // Special handling for imported archives - prioritize archiveUri over category field
                 if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
                     newCategoryText = getString(R.string.imported_archive_category);
                     categoryColor = 0xFF4CAF50; // Green color for imported archives
@@ -1981,6 +2012,16 @@ public class DownloadsScene extends ToolbarScene
         }
 
         try {
+            // Request persistent permissions for the URI
+            try {
+                context.getContentResolver().takePersistableUriPermission(uri, 
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Log.d(TAG, "Successfully obtained persistent permission for URI: " + uri);
+            } catch (SecurityException e) {
+                Log.w(TAG, "Could not obtain persistent permission for URI: " + uri, e);
+                // Continue anyway as the URI might still be accessible
+            }
+            
             // Check if we can access the file
             try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
                 if (inputStream == null) {
@@ -2083,10 +2124,10 @@ public class DownloadsScene extends ToolbarScene
             downloadInfo.title = fileName.replaceAll("\\.[^.]*$", ""); // Remove extension
             downloadInfo.titleJpn = null;
             downloadInfo.thumb = null; // No thumbnail for imported archives
-            downloadInfo.category = EhUtils.UNKNOWN;
+            downloadInfo.category = EhUtils.UNKNOWN; // Keep as UNKNOWN, will be handled in display logic
             downloadInfo.posted = null;
             downloadInfo.uploader = "Local Archive";
-            downloadInfo.rating = 5.0f; // Set 5-star rating for imported archives
+            downloadInfo.rating = -1.0f; // Keep default rating to not affect other downloads
             downloadInfo.state = DownloadInfo.STATE_FINISH;
             downloadInfo.legacy = 0;
             downloadInfo.time = System.currentTimeMillis();
@@ -2094,7 +2135,7 @@ public class DownloadsScene extends ToolbarScene
             downloadInfo.total = 0; // Will be set by archive provider
             downloadInfo.finished = 0;
             
-            // Store the URI in the new archiveUri field
+            // Store the URI in the archiveUri field - this is the key identifier
             downloadInfo.archiveUri = uri.toString();
             
             return downloadInfo;
@@ -2111,18 +2152,43 @@ public class DownloadsScene extends ToolbarScene
         }
     }
     
+    // Cache for archive thumbnails to avoid repeated extraction
+    private final Map<String, Bitmap> thumbnailCache = new HashMap<>();
+    
     private void loadArchiveThumbnail(LoadImageView thumb, Uri archiveUri) {
-        // Load thumbnail in background thread to avoid blocking UI
+        String uriString = archiveUri.toString();
+        
+        // Check cache first
+        if (thumbnailCache.containsKey(uriString)) {
+            Bitmap cachedThumbnail = thumbnailCache.get(uriString);
+            if (cachedThumbnail != null && !cachedThumbnail.isRecycled()) {
+                thumb.setImageBitmap(cachedThumbnail);
+                return;
+            } else {
+                // Remove invalid cached entry
+                thumbnailCache.remove(uriString);
+            }
+        }
+        
+        // Set default icon immediately
+        thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
+        
+        // Load thumbnail in background thread
         new Thread(() -> {
-            Bitmap thumbnail = extractFirstImageFromArchive(archiveUri);
-            runOnUiThread(() -> {
-                if (thumbnail != null) {
-                    thumb.setImageBitmap(thumbnail);
-                } else {
-                    // Fallback to archive icon if extraction fails
-                    thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
-                }
-            });
+            try {
+                Bitmap thumbnail = extractFirstImageFromArchive(archiveUri);
+                runOnUiThread(() -> {
+                    if (thumbnail != null && !thumbnail.isRecycled()) {
+                        // Cache the thumbnail
+                        thumbnailCache.put(uriString, thumbnail);
+                        thumb.setImageBitmap(thumbnail);
+                    }
+                    // If extraction fails, the default icon is already set
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to load archive thumbnail for " + uriString, e);
+                // Default icon is already set, so no need to change anything
+            }
         }).start();
     }
     
@@ -2134,18 +2200,41 @@ public class DownloadsScene extends ToolbarScene
         A7ZipArchive archive = null;
         
         try {
+            // Verify URI accessibility first
+            try (InputStream testStream = context.getContentResolver().openInputStream(archiveUri)) {
+                if (testStream == null) {
+                    Log.w(TAG, "Cannot access archive URI: " + archiveUri);
+                    return null;
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "URI not accessible: " + archiveUri, e);
+                return null;
+            }
+            
             // Open the archive file
             UniFile file = UniFile.fromUri(context, archiveUri);
-            if (file == null) return null;
+            if (file == null || !file.exists()) {
+                Log.w(TAG, "Archive file not found: " + archiveUri);
+                return null;
+            }
             
             uraf = file.createRandomAccessFile("r");
-            if (uraf == null) return null;
+            if (uraf == null) {
+                Log.w(TAG, "Cannot create random access file for: " + archiveUri);
+                return null;
+            }
             
             archive = A7ZipArchive.create(uraf);
-            if (archive == null) return null;
+            if (archive == null) {
+                Log.w(TAG, "Cannot create archive reader for: " + archiveUri);
+                return null;
+            }
             
             List<A7ZipArchive.A7ZipArchiveEntry> entries = archive.getArchiveEntries();
-            if (entries.isEmpty()) return null;
+            if (entries.isEmpty()) {
+                Log.w(TAG, "Archive is empty: " + archiveUri);
+                return null;
+            }
             
             // Sort entries by name (natural order)
             Collections.sort(entries, (o1, o2) -> {
@@ -2162,15 +2251,15 @@ public class DownloadsScene extends ToolbarScene
                     
                     try {
                         // Create a pipe to extract the image
-                        Pipe pipe = new Pipe(4 * 1024);
+                        Pipe pipe = new Pipe(8 * 1024); // Increased buffer size
                         
-                        // Extract in another thread
-                        Pipe finalPipe1 = pipe;
+                        // Extract in another thread with timeout
+                        Pipe finalPipe = pipe;
                         Thread extractThread = new Thread(() -> {
                             try {
-                                entry.extract(finalPipe1.outputStream);
+                                entry.extract(finalPipe.outputStream);
                             } catch (Exception e) {
-                                Log.e(TAG, "Failed to extract image", e);
+                                Log.w(TAG, "Failed to extract image: " + fileName, e);
                             }
                         });
                         extractThread.start();
@@ -2180,8 +2269,8 @@ public class DownloadsScene extends ToolbarScene
                         options.inJustDecodeBounds = true;
                         BitmapFactory.decodeStream(pipe.inputStream, null, options);
                         
-                        // Calculate sample size for thumbnail
-                        int thumbnailSize = 200; // Target thumbnail size
+                        // Calculate sample size for thumbnail (smaller target size for better performance)
+                        int thumbnailSize = 150;
                         int sampleSize = 1;
                         if (options.outHeight > thumbnailSize || options.outWidth > thumbnailSize) {
                             final int halfHeight = options.outHeight / 2;
@@ -2192,13 +2281,13 @@ public class DownloadsScene extends ToolbarScene
                         }
                         
                         // Recreate pipe for actual decoding
-                        pipe = new Pipe(4 * 1024);
-                        Pipe finalPipe = pipe;
+                        pipe = new Pipe(8 * 1024);
+                        Pipe finalPipe1 = pipe;
                         extractThread = new Thread(() -> {
                             try {
-                                entry.extract(finalPipe.outputStream);
+                                entry.extract(finalPipe1.outputStream);
                             } catch (Exception e) {
-                                Log.e(TAG, "Failed to extract image", e);
+                                Log.w(TAG, "Failed to extract image on second attempt: " + fileName, e);
                             }
                         });
                         extractThread.start();
@@ -2206,35 +2295,41 @@ public class DownloadsScene extends ToolbarScene
                         // Decode with sample size
                         options.inJustDecodeBounds = false;
                         options.inSampleSize = sampleSize;
+                        options.inPreferredConfig = Bitmap.Config.RGB_565; // Use less memory
                         Bitmap bitmap = BitmapFactory.decodeStream(pipe.inputStream, null, options);
                         
-                        extractThread.join(5000); // Wait max 5 seconds
+                        extractThread.join(3000); // Wait max 3 seconds (reduced from 5)
                         
-                        if (bitmap != null) {
+                        if (bitmap != null && !bitmap.isRecycled()) {
+                            Log.d(TAG, "Successfully extracted thumbnail from " + fileName);
                             return bitmap;
                         }
                         
                     } catch (Exception e) {
-                        Log.e(TAG, "Failed to extract thumbnail from " + fileName, e);
+                        Log.w(TAG, "Failed to extract thumbnail from " + fileName, e);
+                        // Continue to next image file
                     }
                 }
             }
             
+            Log.w(TAG, "No extractable images found in archive: " + archiveUri);
+            
         } catch (Exception e) {
-            Log.e(TAG, "Failed to process archive for thumbnail", e);
+            Log.e(TAG, "Failed to process archive for thumbnail: " + archiveUri, e);
         } finally {
+            // Ensure resources are properly closed
             if (archive != null) {
                 try {
                     archive.close();
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to close archive", e);
+                    Log.w(TAG, "Failed to close archive", e);
                 }
             }
             if (uraf != null) {
                 try {
                     uraf.close();
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to close file", e);
+                    Log.w(TAG, "Failed to close file", e);
                 }
             }
         }
