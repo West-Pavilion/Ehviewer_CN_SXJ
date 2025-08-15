@@ -1614,12 +1614,26 @@ public class DownloadsScene extends ToolbarScene
             }
 
             if (thumb == v) {
-                Bundle args = new Bundle();
-                args.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_DOWNLOAD_GALLERY_INFO);
-                args.putParcelable(GalleryDetailScene.KEY_GALLERY_INFO, list.get(positionInList(index)));
-                Announcer announcer = new Announcer(GalleryDetailScene.class).setArgs(args);
-                announcer.setTranHelper(new EnterGalleryDetailTransaction(thumb));
-                startScene(announcer);
+                DownloadInfo currentInfo = list.get(positionInList(index));
+                
+                // Special handling for imported archives
+                if (currentInfo.archiveUri != null && currentInfo.archiveUri.startsWith("content://")) {
+                    // Show info dialog for imported archive
+                    String message = getString(R.string.imported_archive_info_message) + "\n\n" + currentInfo.archiveUri;
+                    new AlertDialog.Builder(context)
+                            .setTitle(R.string.imported_archive_info_title)
+                            .setMessage(message)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                } else {
+                    // Normal behavior for regular downloads
+                    Bundle args = new Bundle();
+                    args.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_DOWNLOAD_GALLERY_INFO);
+                    args.putParcelable(GalleryDetailScene.KEY_GALLERY_INFO, currentInfo);
+                    Announcer announcer = new Announcer(GalleryDetailScene.class).setArgs(args);
+                    announcer.setTranHelper(new EnterGalleryDetailTransaction(thumb));
+                    startScene(announcer);
+                }
             } else if (start == v) {
                 final DownloadInfo info = list.get(positionInList(index));
                 Intent intent = new Intent(activity, DownloadService.class);
@@ -1695,7 +1709,14 @@ public class DownloadsScene extends ToolbarScene
                     title = "📦 " + title;
                 }
 
-                holder.thumb.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb, new ThumbDataContainer(info), true);
+                // Handle thumbnail loading for imported archives
+                if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
+                    // For imported archives, use a placeholder or archive icon
+                    holder.thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
+                } else {
+                    // Normal thumbnail loading for regular downloads
+                    holder.thumb.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb, new ThumbDataContainer(info), true);
+                }
 
                 holder.title.setText(title);
                 holder.uploader.setText(info.uploader);
@@ -1711,10 +1732,21 @@ public class DownloadsScene extends ToolbarScene
 
 
                 TextView category = holder.category;
-                String newCategoryText = EhUtils.getCategory(info.category);
+                String newCategoryText;
+                int categoryColor;
+                
+                // Special handling for imported archives
+                if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
+                    newCategoryText = "本地导入";
+                    categoryColor = 0xFF4CAF50; // Green color for imported archives
+                } else {
+                    newCategoryText = EhUtils.getCategory(info.category);
+                    categoryColor = EhUtils.getCategoryColor(info.category);
+                }
+                
                 if (!newCategoryText.equals(category.getText())) {
                     category.setText(newCategoryText);
-                    category.setBackgroundColor(EhUtils.getCategoryColor(info.category));
+                    category.setBackgroundColor(categoryColor);
                 }
                 bindForState(holder, info);
 
@@ -2032,11 +2064,11 @@ public class DownloadsScene extends ToolbarScene
             downloadInfo.token = "";
             downloadInfo.title = fileName.replaceAll("\\.[^.]*$", ""); // Remove extension
             downloadInfo.titleJpn = null;
-            downloadInfo.thumb = null;
+            downloadInfo.thumb = null; // No thumbnail for imported archives
             downloadInfo.category = EhUtils.UNKNOWN;
             downloadInfo.posted = null;
             downloadInfo.uploader = "Local Archive";
-            downloadInfo.rating = -1.0f;
+            downloadInfo.rating = 5.0f; // Set 5-star rating for imported archives
             downloadInfo.state = DownloadInfo.STATE_FINISH;
             downloadInfo.legacy = 0;
             downloadInfo.time = System.currentTimeMillis();

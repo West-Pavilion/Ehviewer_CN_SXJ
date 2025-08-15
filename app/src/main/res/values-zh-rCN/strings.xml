@@ -385,6 +385,8 @@
     <string name="import_archive_no_images">压缩包中未找到图片文件</string>
     <string name="import_archive_processing">正在处理压缩包…</string>
     <string name="import_archive_already_imported">压缩包已导入</string>
+    <string name="imported_archive_info_title">本地导入信息</string>
+    <string name="imported_archive_info_message">这是从本地存储中导入的项目</string>
     <string name="download_search_hint">输入关键字</string>
     <string name="reset_reading_progress_message">重置所有已下载画廊的阅读进度？</string>
     <string name="download_service_label">EhViewer 下载服务</string>
