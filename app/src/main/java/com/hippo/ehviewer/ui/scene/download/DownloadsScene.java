@@ -2006,7 +2006,7 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private void importLocalArchive() {
-        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.setType("*/*");
         intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
             "application/zip", 
@@ -2019,6 +2019,10 @@ public class DownloadsScene extends ToolbarScene
             "application/x-cbr"
         });
         intent.addCategory(Intent.CATEGORY_OPENABLE);
+        // CRITICAL: Add flags to enable persistent URI permissions
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        
         try {
             filePickerLauncher.launch(Intent.createChooser(intent, getString(R.string.import_archive_title)));
         } catch (Exception e) {
@@ -2044,6 +2048,22 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
+        // CRITICAL: Request persistent URI permission IMMEDIATELY when file is selected
+        // This is the key to solving the permission loss issue after app restart
+        try {
+            context.getContentResolver().takePersistableUriPermission(uri, 
+                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            Log.d(TAG, "Successfully obtained persistent URI permission for: " + uri);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Failed to obtain persistent URI permission for: " + uri, e);
+            Toast.makeText(context, R.string.archive_permission_lost, Toast.LENGTH_LONG).show();
+            return;
+        } catch (Exception e) {
+            Log.e(TAG, "Unexpected error when obtaining URI permission for: " + uri, e);
+            Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
         // Show processing dialog
         Toast.makeText(context, R.string.import_archive_processing, Toast.LENGTH_LONG).show();
 
@@ -2058,17 +2078,7 @@ public class DownloadsScene extends ToolbarScene
         }
 
         try {
-            // Request persistent permissions for the URI
-            try {
-                context.getContentResolver().takePersistableUriPermission(uri, 
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                Log.d(TAG, "Successfully obtained persistent permission for URI: " + uri);
-            } catch (SecurityException e) {
-                Log.w(TAG, "Could not obtain persistent permission for URI: " + uri, e);
-                // Continue anyway as the URI might still be accessible
-            }
-            
-            // Check if we can access the file
+            // Verify URI accessibility (permission should already be granted)
             try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
                 if (inputStream == null) {
                     runOnUiThread(() -> 
@@ -2077,7 +2087,7 @@ public class DownloadsScene extends ToolbarScene
                     return;
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Cannot access file", e);
+                Log.e(TAG, "Cannot access file even with persistent permission", e);
                 runOnUiThread(() -> 
                     Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show()
                 );
