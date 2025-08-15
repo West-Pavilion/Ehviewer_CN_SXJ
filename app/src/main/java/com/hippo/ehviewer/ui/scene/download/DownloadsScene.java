@@ -816,9 +816,32 @@ public class DownloadsScene extends ToolbarScene
             
             // Check if this is an imported archive
             if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")) {
-                // This is an imported archive, use ACTION_VIEW with URI
+                // This is an imported archive, ensure URI permission is available
+                Uri archiveUri = Uri.parse(downloadInfo.archiveUri);
+                try {
+                    // Test if we can access the URI
+                    try (InputStream testStream = getEHContext().getContentResolver().openInputStream(archiveUri)) {
+                        if (testStream == null) {
+                            Toast.makeText(getEHContext(), R.string.archive_not_accessible, Toast.LENGTH_SHORT).show();
+                            return true;
+                        }
+                    }
+                } catch (SecurityException e) {
+                    // Try to restore permission
+                    try {
+                        getEHContext().getContentResolver().takePersistableUriPermission(archiveUri, 
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (Exception ex) {
+                        Toast.makeText(getEHContext(), R.string.archive_permission_lost, Toast.LENGTH_LONG).show();
+                        return true;
+                    }
+                } catch (Exception e) {
+                    Toast.makeText(getEHContext(), R.string.archive_not_accessible, Toast.LENGTH_SHORT).show();
+                    return true;
+                }
+                
                 intent.setAction(Intent.ACTION_VIEW);
-                intent.setData(Uri.parse(downloadInfo.archiveUri));
+                intent.setData(archiveUri);
             } else {
                 // This is a normal download, use ACTION_EH
                 intent.setAction(GalleryActivity.ACTION_EH);
@@ -1006,9 +1029,32 @@ public class DownloadsScene extends ToolbarScene
         
         // Check if this is an imported archive
         if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")) {
-            // This is an imported archive, use ACTION_VIEW with URI
+            // This is an imported archive, ensure URI permission is available
+            Uri archiveUri = Uri.parse(downloadInfo.archiveUri);
+            try {
+                // Test if we can access the URI
+                try (InputStream testStream = getEHContext().getContentResolver().openInputStream(archiveUri)) {
+                    if (testStream == null) {
+                        Toast.makeText(getEHContext(), R.string.archive_not_accessible, Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                }
+            } catch (SecurityException e) {
+                // Try to restore permission
+                try {
+                    getEHContext().getContentResolver().takePersistableUriPermission(archiveUri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Exception ex) {
+                    Toast.makeText(getEHContext(), R.string.archive_permission_lost, Toast.LENGTH_LONG).show();
+                    return;
+                }
+            } catch (Exception e) {
+                Toast.makeText(getEHContext(), R.string.archive_not_accessible, Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
             intent.setAction(Intent.ACTION_VIEW);
-            intent.setData(Uri.parse(downloadInfo.archiveUri));
+            intent.setData(archiveUri);
         } else {
             // This is a normal download, use ACTION_EH
             intent.setAction(GalleryActivity.ACTION_EH);
@@ -2170,7 +2216,7 @@ public class DownloadsScene extends ToolbarScene
             }
         }
         
-        // Set default icon immediately
+        // Set default icon immediately as fallback
         thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
         
         // Load thumbnail in background thread
@@ -2182,12 +2228,18 @@ public class DownloadsScene extends ToolbarScene
                         // Cache the thumbnail
                         thumbnailCache.put(uriString, thumbnail);
                         thumb.setImageBitmap(thumbnail);
+                    } else {
+                        // If extraction fails, check if we have a previous cached thumbnail
+                        Bitmap fallbackThumbnail = thumbnailCache.get(uriString);
+                        if (fallbackThumbnail != null && !fallbackThumbnail.isRecycled()) {
+                            thumb.setImageBitmap(fallbackThumbnail);
+                        }
+                        // Otherwise keep the default archive icon that was already set
                     }
-                    // If extraction fails, the default icon is already set
                 });
             } catch (Exception e) {
                 Log.e(TAG, "Failed to load archive thumbnail for " + uriString, e);
-                // Default icon is already set, so no need to change anything
+                // Keep the default icon that was already set - no need to change anything
             }
         }).start();
     }
@@ -2200,10 +2252,28 @@ public class DownloadsScene extends ToolbarScene
         A7ZipArchive archive = null;
         
         try {
-            // Verify URI accessibility first
+            // Verify URI accessibility first and try to restore permission if needed
             try (InputStream testStream = context.getContentResolver().openInputStream(archiveUri)) {
                 if (testStream == null) {
                     Log.w(TAG, "Cannot access archive URI: " + archiveUri);
+                    return null;
+                }
+            } catch (SecurityException e) {
+                Log.w(TAG, "URI permission lost, attempting to restore: " + archiveUri, e);
+                // Try to restore the permission
+                try {
+                    context.getContentResolver().takePersistableUriPermission(archiveUri, 
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    Log.d(TAG, "Successfully restored URI permission for: " + archiveUri);
+                    // Try again after restoring permission
+                    try (InputStream retryStream = context.getContentResolver().openInputStream(archiveUri)) {
+                        if (retryStream == null) {
+                            Log.w(TAG, "Still cannot access URI after permission restore: " + archiveUri);
+                            return null;
+                        }
+                    }
+                } catch (Exception restoreEx) {
+                    Log.e(TAG, "Failed to restore URI permission for: " + archiveUri, restoreEx);
                     return null;
                 }
             } catch (Exception e) {

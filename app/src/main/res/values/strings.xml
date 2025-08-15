@@ -464,6 +464,8 @@
     <string name="imported_archive_info_title">Local Import Info</string>
     <string name="imported_archive_info_message">This is an item imported from local storage</string>
     <string name="imported_archive_category">Local Import</string>
+    <string name="archive_not_accessible">Archive file is not accessible</string>
+    <string name="archive_permission_lost">Permission to access archive has been lost. Please re-import the archive file.</string>
     <string name="download_search_hint">Input search key</string>
     <string name="reset_reading_progress_message">Reset the reading progress of all downloaded galleries?</string>
     <string name="download_service_label">EhViewer Download Service</string>
