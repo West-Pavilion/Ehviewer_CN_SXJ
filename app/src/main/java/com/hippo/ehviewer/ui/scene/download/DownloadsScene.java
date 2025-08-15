@@ -31,6 +31,8 @@ import android.provider.OpenableColumns;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Point;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
@@ -75,6 +77,9 @@ import com.hippo.easyrecyclerview.EasyRecyclerView;
 import com.hippo.easyrecyclerview.FastScroller;
 import com.hippo.easyrecyclerview.HandlerDrawable;
 import com.hippo.easyrecyclerview.MarginItemDecoration;
+import com.hippo.ehviewer.gallery.A7ZipArchive;
+import com.hippo.a7zip.ArchiveException;
+import com.hippo.unifile.UniRandomAccessFile;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
@@ -106,6 +111,8 @@ import com.hippo.ripple.Ripple;
 import com.hippo.scene.Announcer;
 import com.hippo.streampipe.InputStreamPipe;
 import com.hippo.unifile.UniFile;
+import com.hippo.util.NaturalComparator;
+import com.hippo.ehviewer.gallery.Pipe;
 import com.hippo.util.DrawableManager;
 import com.hippo.util.IoThreadPoolExecutor;
 import com.hippo.view.ViewTransition;
@@ -130,7 +137,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -1711,8 +1720,8 @@ public class DownloadsScene extends ToolbarScene
 
                 // Handle thumbnail loading for imported archives
                 if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
-                    // For imported archives, use a placeholder or archive icon
-                    holder.thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
+                    // For imported archives, extract first image as thumbnail
+                    loadArchiveThumbnail(holder.thumb, Uri.parse(info.archiveUri));
                 } else {
                     // Normal thumbnail loading for regular downloads
                     holder.thumb.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb, new ThumbDataContainer(info), true);
@@ -2091,5 +2100,136 @@ public class DownloadsScene extends ToolbarScene
         if (activity != null) {
             activity.runOnUiThread(runnable);
         }
+    }
+    
+    private void loadArchiveThumbnail(LoadImageView thumb, Uri archiveUri) {
+        // Load thumbnail in background thread to avoid blocking UI
+        new Thread(() -> {
+            Bitmap thumbnail = extractFirstImageFromArchive(archiveUri);
+            runOnUiThread(() -> {
+                if (thumbnail != null) {
+                    thumb.setImageBitmap(thumbnail);
+                } else {
+                    // Fallback to archive icon if extraction fails
+                    thumb.setImageResource(R.drawable.v_archive_hh_primary_x48);
+                }
+            });
+        }).start();
+    }
+    
+    private Bitmap extractFirstImageFromArchive(Uri archiveUri) {
+        Context context = getEHContext();
+        if (context == null) return null;
+        
+        UniRandomAccessFile uraf = null;
+        A7ZipArchive archive = null;
+        
+        try {
+            // Open the archive file
+            UniFile file = UniFile.fromUri(context, archiveUri);
+            if (file == null) return null;
+            
+            uraf = file.createRandomAccessFile("r");
+            if (uraf == null) return null;
+            
+            archive = A7ZipArchive.create(uraf);
+            if (archive == null) return null;
+            
+            List<A7ZipArchive.A7ZipArchiveEntry> entries = archive.getArchiveEntries();
+            if (entries.isEmpty()) return null;
+            
+            // Sort entries by name (natural order)
+            Collections.sort(entries, (o1, o2) -> {
+                NaturalComparator comparator = new NaturalComparator();
+                return comparator.compare(o1.getPath(), o2.getPath());
+            });
+            
+            // Find the first image file
+            for (A7ZipArchive.A7ZipArchiveEntry entry : entries) {
+                String fileName = entry.getPath().toLowerCase();
+                if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || 
+                    fileName.endsWith(".png") || fileName.endsWith(".bmp") ||
+                    fileName.endsWith(".gif") || fileName.endsWith(".webp")) {
+                    
+                    try {
+                        // Create a pipe to extract the image
+                        Pipe pipe = new Pipe(4 * 1024);
+                        
+                        // Extract in another thread
+                        Pipe finalPipe1 = pipe;
+                        Thread extractThread = new Thread(() -> {
+                            try {
+                                entry.extract(finalPipe1.outputStream);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to extract image", e);
+                            }
+                        });
+                        extractThread.start();
+                        
+                        // Decode the image with size limits
+                        BitmapFactory.Options options = new BitmapFactory.Options();
+                        options.inJustDecodeBounds = true;
+                        BitmapFactory.decodeStream(pipe.inputStream, null, options);
+                        
+                        // Calculate sample size for thumbnail
+                        int thumbnailSize = 200; // Target thumbnail size
+                        int sampleSize = 1;
+                        if (options.outHeight > thumbnailSize || options.outWidth > thumbnailSize) {
+                            final int halfHeight = options.outHeight / 2;
+                            final int halfWidth = options.outWidth / 2;
+                            while ((halfHeight / sampleSize) >= thumbnailSize && (halfWidth / sampleSize) >= thumbnailSize) {
+                                sampleSize *= 2;
+                            }
+                        }
+                        
+                        // Recreate pipe for actual decoding
+                        pipe = new Pipe(4 * 1024);
+                        Pipe finalPipe = pipe;
+                        extractThread = new Thread(() -> {
+                            try {
+                                entry.extract(finalPipe.outputStream);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to extract image", e);
+                            }
+                        });
+                        extractThread.start();
+                        
+                        // Decode with sample size
+                        options.inJustDecodeBounds = false;
+                        options.inSampleSize = sampleSize;
+                        Bitmap bitmap = BitmapFactory.decodeStream(pipe.inputStream, null, options);
+                        
+                        extractThread.join(5000); // Wait max 5 seconds
+                        
+                        if (bitmap != null) {
+                            return bitmap;
+                        }
+                        
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to extract thumbnail from " + fileName, e);
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to process archive for thumbnail", e);
+        } finally {
+            if (archive != null) {
+                try {
+                    archive.close();
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to close archive", e);
+                }
+            }
+            if (uraf != null) {
+                try {
+                    uraf.close();
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to close file", e);
+                }
+            }
+        }
+        
+        return null;
     }
 }
