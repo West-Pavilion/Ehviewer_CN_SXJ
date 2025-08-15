@@ -1746,7 +1746,7 @@ public class DownloadsScene extends ToolbarScene
                 
                 // Special handling for imported archives
                 if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
-                    newCategoryText = "本地导入";
+                    newCategoryText = getString(R.string.imported_archive_category);
                     categoryColor = 0xFF4CAF50; // Green color for imported archives
                 } else {
                     newCategoryText = EhUtils.getCategory(info.category);
