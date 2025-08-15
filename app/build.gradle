@@ -25,7 +25,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.xjs.ehviewer"
+        applicationId "com.westpavilion.ehviewerplus"
         minSdkVersion 23
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 29
