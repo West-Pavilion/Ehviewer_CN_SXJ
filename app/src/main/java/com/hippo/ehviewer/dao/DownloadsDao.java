@@ -196,7 +196,8 @@ public class DownloadsDao extends AbstractDao<DownloadInfo, Long> {
             cursor.getInt(offset + 10), // state
             cursor.getInt(offset + 11), // legacy
             cursor.getLong(offset + 12), // time
-            cursor.isNull(offset + 13) ? null : cursor.getString(offset + 13) // label
+            cursor.isNull(offset + 13) ? null : cursor.getString(offset + 13), // label
+                null
         );
         return entity;
     }

@@ -24,6 +24,10 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Point;
@@ -222,6 +226,12 @@ public class DownloadsScene extends ToolbarScene
     private final ActivityResultLauncher<Intent> galleryActivityLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             this::updateReadProcess
+    );
+
+    @NonNull
+    private final ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            this::handleSelectedFile
     );
 
     @Override
@@ -651,6 +661,9 @@ public class DownloadsScene extends ToolbarScene
             case R.id.sort_by_rating_desc:
                 gotoFilterAndSort(id);
                 return true;
+            case R.id.import_local_archive:
+                importLocalArchive();
+                return true;
 
         }
         return false;
@@ -781,10 +794,20 @@ public class DownloadsScene extends ToolbarScene
                 return false;
             }
 
+            DownloadInfo downloadInfo = list.get(positionInList(position));
             Intent intent = new Intent(activity, GalleryActivity.class);
-            intent.setAction(GalleryActivity.ACTION_EH);
-            intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, list.get(positionInList(position)));
-//            startActivity(intent);
+            
+            // Check if this is an imported archive
+            if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")) {
+                // This is an imported archive, use ACTION_VIEW with URI
+                intent.setAction(Intent.ACTION_VIEW);
+                intent.setData(Uri.parse(downloadInfo.archiveUri));
+            } else {
+                // This is a normal download, use ACTION_EH
+                intent.setAction(GalleryActivity.ACTION_EH);
+                intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, downloadInfo);
+            }
+            
             galleryActivityLauncher.launch(intent);
             return true;
         }
@@ -961,9 +984,20 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
+        DownloadInfo downloadInfo = list.get(position);
         Intent intent = new Intent(activity, GalleryActivity.class);
-        intent.setAction(GalleryActivity.ACTION_EH);
-        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, list.get(position));
+        
+        // Check if this is an imported archive
+        if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")) {
+            // This is an imported archive, use ACTION_VIEW with URI
+            intent.setAction(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(downloadInfo.archiveUri));
+        } else {
+            // This is a normal download, use ACTION_EH
+            intent.setAction(GalleryActivity.ACTION_EH);
+            intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, downloadInfo);
+        }
+        
         galleryActivityLauncher.launch(intent);
     }
 
@@ -1110,6 +1144,7 @@ public class DownloadsScene extends ToolbarScene
         if (info.state == DownloadInfo.STATE_WAIT || info.state == DownloadInfo.STATE_DOWNLOAD) {
             holder.start.setVisibility(View.GONE);
             holder.stop.setVisibility(View.VISIBLE);
+            
         } else {
             holder.start.setVisibility(View.VISIBLE);
             holder.stop.setVisibility(View.GONE);
@@ -1655,7 +1690,11 @@ public class DownloadsScene extends ToolbarScene
 
                 String title = EhUtils.getSuitableTitle(info);
 
-//                holder.thumb.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb, true);
+                // Add special prefix for imported archives
+                if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
+                    title = "📦 " + title;
+                }
+
                 holder.thumb.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb, new ThumbDataContainer(info), true);
 
                 holder.title.setText(title);
@@ -1845,6 +1884,180 @@ public class DownloadsScene extends ToolbarScene
                 }
                 mRecyclerView.scrollToPosition(0);
             }
+        }
+    }
+
+    private void importLocalArchive() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/x-rar-compressed", "application/x-zip-compressed"});
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            filePickerLauncher.launch(Intent.createChooser(intent, getString(R.string.import_archive_title)));
+        } catch (Exception e) {
+            Context context = getEHContext();
+            if (context != null) {
+                Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void handleSelectedFile(ActivityResult result) {
+        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
+            return;
+        }
+
+        Uri uri = result.getData().getData();
+        if (uri == null) {
+            return;
+        }
+
+        Context context = getEHContext();
+        if (context == null) {
+            return;
+        }
+
+        // Show processing dialog
+        Toast.makeText(context, R.string.import_archive_processing, Toast.LENGTH_LONG).show();
+
+        // Process the archive file in background
+        new Thread(() -> processArchiveFile(uri)).start();
+    }
+
+    private void processArchiveFile(Uri uri) {
+        Context context = getEHContext();
+        if (context == null) {
+            return;
+        }
+
+        try {
+            // Check if we can access the file
+            try (InputStream inputStream = context.getContentResolver().openInputStream(uri)) {
+                if (inputStream == null) {
+                    runOnUiThread(() -> 
+                        Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show()
+                    );
+                    return;
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Cannot access file", e);
+                runOnUiThread(() -> 
+                    Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show()
+                );
+                return;
+            }
+
+            // Get file name
+            String fileName = getFileName(context, uri);
+            if (fileName == null) {
+                fileName = "imported_archive_" + System.currentTimeMillis();
+            }
+
+            // Validate file format
+            if (!isValidArchiveFormat(fileName)) {
+                runOnUiThread(() -> 
+                    Toast.makeText(context, R.string.import_archive_invalid_format, Toast.LENGTH_SHORT).show()
+                );
+                return;
+            }
+
+            // Create DownloadInfo for the archive
+            DownloadInfo downloadInfo = createArchiveDownloadInfo(context, uri, fileName);
+            if (downloadInfo == null) {
+                runOnUiThread(() -> 
+                    Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show()
+                );
+                return;
+            }
+
+            // Check if already imported
+            if (mDownloadManager != null && mDownloadManager.containDownloadInfo(downloadInfo.gid)) {
+                runOnUiThread(() -> 
+                    Toast.makeText(context, R.string.import_archive_already_imported, Toast.LENGTH_SHORT).show()
+                );
+                return;
+            }
+
+            // Add to download manager
+            if (mDownloadManager != null) {
+                List<DownloadInfo> downloadList = new ArrayList<>();
+                downloadList.add(downloadInfo);
+                mDownloadManager.addDownload(downloadList);
+                runOnUiThread(() -> {
+                    Toast.makeText(context, R.string.import_archive_success, Toast.LENGTH_SHORT).show();
+                    updateForLabel();
+                    updateView();
+                });
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to process archive file", e);
+            runOnUiThread(() -> 
+                Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show()
+            );
+        }
+    }
+
+    private String getFileName(Context context, Uri uri) {
+        String fileName = null;
+        if ("content".equals(uri.getScheme())) {
+            try (Cursor cursor = context.getContentResolver().query(uri, null, null, null, null)) {
+                if (cursor != null && cursor.moveToFirst()) {
+                    int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (nameIndex >= 0) {
+                        fileName = cursor.getString(nameIndex);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to get file name", e);
+            }
+        }
+        if (fileName == null) {
+            fileName = uri.getLastPathSegment();
+        }
+        return fileName;
+    }
+
+    private boolean isValidArchiveFormat(String fileName) {
+        if (fileName == null) return false;
+        String lowerName = fileName.toLowerCase();
+        return lowerName.endsWith(".zip") || lowerName.endsWith(".rar") || 
+               lowerName.endsWith(".cbz") || lowerName.endsWith(".cbr");
+    }
+
+    private DownloadInfo createArchiveDownloadInfo(Context context, Uri uri, String fileName) {
+        try {
+            DownloadInfo downloadInfo = new DownloadInfo();
+            downloadInfo.gid = System.currentTimeMillis(); // Use timestamp as unique ID
+            downloadInfo.token = "";
+            downloadInfo.title = fileName.replaceAll("\\.[^.]*$", ""); // Remove extension
+            downloadInfo.titleJpn = null;
+            downloadInfo.thumb = null;
+            downloadInfo.category = EhUtils.UNKNOWN;
+            downloadInfo.posted = null;
+            downloadInfo.uploader = "Local Archive";
+            downloadInfo.rating = -1.0f;
+            downloadInfo.state = DownloadInfo.STATE_FINISH;
+            downloadInfo.legacy = 0;
+            downloadInfo.time = System.currentTimeMillis();
+            downloadInfo.label = null;
+            downloadInfo.total = 0; // Will be set by archive provider
+            downloadInfo.finished = 0;
+            
+            // Store the URI in the new archiveUri field
+            downloadInfo.archiveUri = uri.toString();
+            
+            return downloadInfo;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to create DownloadInfo", e);
+            return null;
+        }
+    }
+
+    private void runOnUiThread(Runnable runnable) {
+        Activity activity = getActivity2();
+        if (activity != null) {
+            activity.runOnUiThread(runnable);
         }
     }
 }

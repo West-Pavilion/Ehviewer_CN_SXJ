@@ -377,6 +377,14 @@
     <string name="download_stop_all">全部停止</string>
     <string name="download_reset_reading_progress">重置阅读进度</string>
     <string name="download_search_gallery">搜索画廊</string>
+    <string name="import_local_archive">导入本地压缩包</string>
+    <string name="import_archive_title">选择压缩包文件</string>
+    <string name="import_archive_success">压缩包导入成功</string>
+    <string name="import_archive_failed">压缩包导入失败</string>
+    <string name="import_archive_invalid_format">不支持的压缩包格式</string>
+    <string name="import_archive_no_images">压缩包中未找到图片文件</string>
+    <string name="import_archive_processing">正在处理压缩包…</string>
+    <string name="import_archive_already_imported">压缩包已导入</string>
     <string name="download_search_hint">输入关键字</string>
     <string name="reset_reading_progress_message">重置所有已下载画廊的阅读进度？</string>
     <string name="download_service_label">EhViewer 下载服务</string>

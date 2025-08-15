@@ -453,6 +453,14 @@
     <string name="download_stop_all">Stop all</string>
     <string name="download_reset_reading_progress">Reset reading progress</string>
     <string name="download_search_gallery">Search gallery</string>
+    <string name="import_local_archive">Import local archive</string>
+    <string name="import_archive_title">Select archive file</string>
+    <string name="import_archive_success">Archive imported successfully</string>
+    <string name="import_archive_failed">Failed to import archive</string>
+    <string name="import_archive_invalid_format">Unsupported archive format</string>
+    <string name="import_archive_no_images">No image files found in archive</string>
+    <string name="import_archive_processing">Processing archive…</string>
+    <string name="import_archive_already_imported">Archive already imported</string>
     <string name="download_search_hint">Input search key</string>
     <string name="reset_reading_progress_message">Reset the reading progress of all downloaded galleries?</string>
     <string name="download_service_label">EhViewer Download Service</string>
