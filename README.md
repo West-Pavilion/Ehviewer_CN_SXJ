@@ -3,6 +3,8 @@ Ehviewer 是一个安卓平台的漫画阅读器，详情参见：https://github
 
 由于Ehviewer不支持导入本地图库功能，所以我给它加了一个导入本地压缩包的功能，方便阅读不在e绅士发布的漫画
 
+https://github.com/user-attachments/assets/ce5c096d-574f-4b66-91b5-98af54c08811
+
 # EhViewer
 
 ![Icon](fastlane/metadata/android/en-US/images/icon.png)
