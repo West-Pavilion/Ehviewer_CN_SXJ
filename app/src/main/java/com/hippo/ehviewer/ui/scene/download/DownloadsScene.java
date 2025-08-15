@@ -1931,7 +1931,16 @@ public class DownloadsScene extends ToolbarScene
     private void importLocalArchive() {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/x-rar-compressed", "application/x-zip-compressed"});
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+            "application/zip", 
+            "application/x-zip-compressed",
+            "application/x-rar-compressed", 
+            "application/vnd.rar",
+            "application/x-rar",
+            "application/rar",
+            "application/x-cbz",
+            "application/x-cbr"
+        });
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         try {
             filePickerLauncher.launch(Intent.createChooser(intent, getString(R.string.import_archive_title)));
