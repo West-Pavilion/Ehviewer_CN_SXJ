@@ -811,7 +811,7 @@ public final class SpiderQueen implements Runnable {
             return spiderInfo;
         } catch (Throwable e) {
             ExceptionUtils.throwIfFatal(e);
-            FirebaseCrashlytics.getInstance().recordException(e);
+//            FirebaseCrashlytics.getInstance().recordException(e);
             return null;
         }
     }
