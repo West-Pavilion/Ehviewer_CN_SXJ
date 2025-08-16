@@ -347,6 +347,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             return;
         }
 
+        // Do nothing in the case of a local compressed file.
+        if (galleryInfo instanceof DownloadInfo downloadInfo) {
+            if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")){
+                return;
+            }
+        }
+
         // Check in download list
         DownloadInfo info = mAllInfoMap.get(galleryInfo.gid);
         if (info != null) { // Get it in download list
