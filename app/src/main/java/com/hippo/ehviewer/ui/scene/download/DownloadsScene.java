@@ -1170,6 +1170,14 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
+        // Check if this is an imported archive - skip state judging
+        boolean isImportedArchive = false;
+        isImportedArchive = info.archiveUri != null &&
+                info.archiveUri.startsWith("content://");
+        if (isImportedArchive) {
+            bindState(holder, info, resources.getString(R.string.download_state_finish));
+            return;
+        }
         switch (info.state) {
             case DownloadInfo.STATE_NONE:
                 bindState(holder, info, resources.getString(R.string.download_state_none));
