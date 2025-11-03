@@ -22,7 +22,6 @@ import android.util.Pair;
 
 import androidx.annotation.Nullable;
 
-import com.google.firebase.crashlytics.FirebaseCrashlytics;
 import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.R;
@@ -331,7 +330,6 @@ public class EhTagDatabase {
             return true;
         } catch (Throwable t) {
             ExceptionUtils.throwIfFatal(t);
-            FirebaseCrashlytics.getInstance().recordException(t);
             return false;
         }
     }

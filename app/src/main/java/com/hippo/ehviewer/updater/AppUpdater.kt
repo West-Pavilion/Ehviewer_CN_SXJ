@@ -9,7 +9,6 @@ import androidx.core.content.ContextCompat
 import com.alibaba.fastjson.JSON
 import com.alibaba.fastjson.JSONException
 import com.alibaba.fastjson.JSONObject
-import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.hippo.ehviewer.AppConfig
 import com.hippo.ehviewer.BuildConfig
 import com.hippo.ehviewer.EhApplication
@@ -222,7 +221,6 @@ class AppUpdater(private val name: String, source: BufferedSource) {
                 } else currentVersionCode < tempUpdateData.getInteger(VERSION_CODE)
             } catch (e: JSONException) {
                 Log.e(TAG, e.message, e)
-                FirebaseCrashlytics.getInstance().recordException(e)
                 return false
             }
         }
@@ -246,7 +244,6 @@ class AppUpdater(private val name: String, source: BufferedSource) {
                 }
             } catch (t: Throwable) {
                 ExceptionUtils.throwIfFatal(t)
-                FirebaseCrashlytics.getInstance().recordException(t)
                 return false
             }
         }
